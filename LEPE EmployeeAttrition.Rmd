@@ -1,0 +1,570 @@
+---
+title: 'Labour Economics and Policy Evaluation. Investigating employee attrition: causal inference using Regression Discontinuity Design, Instrumental Variables and Random Control Trials'
+author: "Lorenzo Rossi, University of Milan"
+date: "17/01/2022"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  word_document: default
+  html_document: default
+abstract: The main factors that contribute to employee attrition were analysed using causal inference techniques such as Regression Discontinuity Design (RDD), Instrumental Variables (IV) and Random Control Trials (RCT), on an anonymous IBM dataset. The research found that having to work overtime widely causes employees to quit their job, but sufficient training helps preventing this issue. Income and age play an important role as well. Low remunerative positions present higher rates of attrition, especially in younger age groups. At the same time, promotions don't reduce the probability of attrition, except in higher-income employees. Morevoer, employees who have already worked in many companies are more likely to quit.         
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Introduction
+
+
+This paper will perform some of the most important causal inference techniques in order to understand the main factors that influence employee attrition. The data on which this research is based come from an anonymized dataset from [IBM](https://www.kaggle.com/pavansubhasht/ibm-hr-analytics-attrition-dataset).
+
+
+Employee attrition occurs when the size of the workforce of a company diminishes over time due to unavoidable factors such as employee resignation for personal or professional reasons. Contrarily to turnover, when the company makes efforts to replace the lost employee, in attrition cases the vacancy remains unfilled, or the employer completely eliminates that position. Usually, employers look to reach a low attrition rate since it means that their employees are satisfied and they don't have to invest in hiring and training new people.
+Attrition is an inevitable part of any business and, as said, some forms are unavoidable, like if an employee is retiring or is moving to another city. But attrition may be caused by several reasons, and it is of utmost importance to understand its processes in order to consciously address or prevent it, and not let it become a cause of concern for the company, the employer and the other workers.
+
+
+While sometimes a company needs to eliminate positions to stay financially afloat, assign new duties to particular employees or implement new technologies that can replace the labor force, having high levels of attrition may lead to a lack of continuity, training gaps, and a lack of institutional knowledge. It can take a long time to fill positions (especially specialized roles), and leaving these positions empty, it can become difficult to fill these positions later. These holes can cause burnout for the remaining employees and lower overall productivity, leading to unhappy customers and struggles for the company.  
+
+
+The following analysis will try to address the issue of attrition.
+The first part will focus on data visualisation and exploration, while the second one will be dedicated to the implementation of causal inference models. Fort this paper, the following were choses:
+
+1. Regression Discontinuity Design
+
+2. Instrumental Variables
+
+3. Random Control Trials
+
+```{r include=FALSE}
+library(car)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(ggplot2)
+library(Hmisc)
+library(olsrr)
+library(tidyverse)
+library(caret)
+library(leaps)
+library(glmnet)
+library(mlbench)
+library(MASS)
+library(pROC)
+library(Metrics)
+library(nnet)
+library(AER)
+library(rdd)
+library(rddtools)
+library(sandwich)
+library(lmtest)
+library(jtools)
+library(huxtable)
+library(kableExtra)
+library(stats)
+library(base)
+library(magrittr)
+library(corrplot)
+library(ppcor)
+```
+
+```{r include=FALSE}
+data <- read.csv('EmployeeAttritionDef.csv')
+str(data)
+```
+```{r include=FALSE}
+names(data)[1] <- "Department"
+data$MonthlyIncome <- data$MonthlyIncome/1000
+```
+
+
+# Data analysis and visualisation
+
+
+The dataset consists in 28 variables, both categorical and numerical. The main variable is Attrition, indicated with 1 or 0, depending on the status of the employee.
+Each employee is affiliated with its job role, its department and its education background.
+Along with some primary variable like age, monthly income, gender and marital status, there are several others concerning the professional profile of the related employee, such as the years in its current role, in its current company or with its current manager, the number of companies in which the person worked, the years since its last promotion, if the subject works overtime and many more.
+
+
+
+The first part of the data analysis consists in having a visual perspective of attrition in relation with certain background variables. 
+The following charts show the attrition rate in each department, for each job role and education background.
+As it is clear, the department of **R&D** presents a lower attrition rate than HR and Sales. 
+The job role who suffers more from attrition among its employees is the **Sales Representative**, followed by **Laboratory Technicians** and HR personnel.
+Finally, the degrees that are associated with higher rates of attrition are the ones in **Human Resources** and the **Technical Degree** 
+
+
+
+```{r include=FALSE}
+#creating values "Yes" and "No" for Attrition
+data$CatAtt <- ifelse(data$Attrition == 1,
+                      c("Yes"), c("No"))
+```
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+ggplot(data, aes(x = Department, fill = CatAtt)) +
+  geom_bar(position = 'fill') +
+  theme_classic()
+```
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+ggplot(data, aes(x = JobRole, fill = CatAtt)) +
+  geom_bar(position = 'fill') +
+  theme_classic()
+```
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+ggplot(data, aes(x = EducationField, fill = CatAtt)) +
+  geom_bar(position = 'fill') +
+  theme_classic()
+```
+
+
+
+Taking a look at the *Age* variable, despite its distribution being not particularly skewed, the frequency of attrition is clearly concentrated in the younger age groups.
+Therefore, a new categorical variable was created, in order to identify the individuals under 35 years old. The consequent chart confirms an higher attrition rate for this age group.
+
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+hist(data$Age, breaks=30, main="Age")
+ggplot(data, aes(x = Age, y = Attrition)) +
+  geom_bar(stat = "identity")
+```
+
+```{r include=FALSE}
+quantile(data$Age)
+```
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+data$IsUnder35 <- ifelse(data$Age < 35,
+                         c('Yes'), c('No'))
+ggplot(data, aes(x = IsUnder35, fill = CatAtt)) +
+  geom_bar(position = position_dodge()) +
+  theme_classic()
+
+
+```
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+ggplot(data, aes(x = IsUnder35, fill = CatAtt)) +
+  geom_bar(position = 'fill') +
+  theme_classic()
+```
+
+
+
+A similar procedure was iterated when visualizing the values of monthly income. However, in this case the skeweness of the distribution is much more clear, revealing that the majority of subjects earns around 5.000 dollars per month or less.
+The distribution was divided into a four-categories variable and it's clear that lower incomes present an higher level of attrition
+
+
+
+```{r echo=FALSE,fig.align="center", message=FALSE, out.width="50%"}
+hist(data$MonthlyIncome, breaks = 30, main="MonthlyIncome")
+```
+
+```{r echo=FALSE}
+quantile(data$MonthlyIncome)
+```
+
+```{r echo=FALSE,fig.align="center", message=FALSE, out.width="50%"}
+attach(data)
+data$MonthlyIncomeCat[MonthlyIncome >= 1.009 & MonthlyIncome < 2.911 ] <- 'Low'
+data$MonthlyIncomeCat[MonthlyIncome >= 2.911 & MonthlyIncome < 4.919] <- 'Middle-Low'
+data$MonthlyIncomeCat[MonthlyIncome >= 4.919 & MonthlyIncome < 8.379] <- 'Middle-High'
+data$MonthlyIncomeCat[MonthlyIncome >= 8.379] <- 'High'
+detach(data)
+
+ggplot(data, aes(x = MonthlyIncomeCat, fill = CatAtt)) +
+  geom_bar(position = position_dodge()) +
+  theme_classic()
+```
+
+
+Finally, one last analysis consists in visualizing, through a scatter plot, the relation between age and income. As one may imagine, despite some outliers, younger employees are associated with lower incomes than the older ones.
+
+
+
+```{r echo=FALSE,fig.align="center", message=FALSE, out.width="50%"}
+data %>% 
+  ggplot(aes(x = Age, y = MonthlyIncome)) + 
+  geom_point() +
+  geom_vline(xintercept = 35, color = "red", size = 1, linetype = "dashed") + 
+  annotate("text", x = 60, y = 20, label = "income per age",
+           size=4) +
+  labs(y = "income",
+       x = "age")
+
+```
+```{r include=FALSE}
+data2 <- data[,c(1:7,10,11,16,17,21,22,23,25:27)]
+```
+
+
+
+# Regression models
+
+
+Despite recognizing the value of certain variables like job involvement or job satisfaction, that certainly reflect the the opinion of the employee towards the workplace, the choice for the variables to insert into the models was done by selecting just the quantitative and "objective" ones, meaning the variables that reflect and the status of the worker and exactly quantify specific aspects of its professional profile (such as age, income, total working years, years in the current company or last promotion), in order to perform the most impartial analysis. The selection is the following:
+
+* Attrition
+
+* Overtime work
+
+* MaritalStatus 
+
+* Education 
+
+* Gender 
+
+* Age 
+
+* NumCompaniesWorked 
+
+* YearsInCurrentRole
+
+* YearsSinceLastPromotion
+               
+* YearsAtCompany 
+
+* StockOptionLevel
+
+* TrainingTimesLastYear
+
+* JobRole
+
+
+To have an initial overview of the relations among the variables, the first step was the computation of the following *correlation matrix* between the numerical variables. Positive and negative correlations are indicated with the blue and red color, respectively. White spaces are associated with a p-value greater than 0.05 and thus, non significant.
+
+```{r include=FALSE}
+flattenCorrMatrix2 <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+  )
+}
+pc <- pcor(data2[4:17])
+flattenCorrMatrix2(pc$estimate, pc$p.value)
+
+# Extract the correlation coefficients
+pc$estimate
+# Extract p-values
+pc$p.value
+
+#corrplot
+
+# Insignificant correlation are crossed
+```
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="50%"}
+corrplot(pc$estimate, method="color",
+         type="upper", order="hclust",
+         addCoef.col = "black", tl.cex = 0.5, 
+         tl.col="black", tl.srt=90,
+         p.mat = pc$p.value, sig.level = 0.01,
+         number.cex = .5, insig = "blank", diag=FALSE)
+
+```
+
+
+
+## Logistic Regression
+
+
+The first model consist in a simple logistic regression in which all the selected variables have been regressed on the dependent one, _Attrition_, in order to have a first look at what mainly influences the variable of interest.
+It's possible to notice that many of the selected variables influence, either negatively or positively the value of Attrition. The exception are _Gender_, _MaritalStatus_, _TrainingTimeLastYear_ and _YearsAtCompany_, because of the high p-value.
+An impressive coefficient is the one related to _OverTime_ (1.49), also associated with a p-value even lower than 0.01, making this variable a particularly relelvant factor.   
+
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+logit <- glm(Attrition ~ OverTime + MaritalStatus + Education + Gender + Age + MonthlyIncome +
+               NumCompaniesWorked + YearsInCurrentRole +YearsSinceLastPromotion +
+               YearsAtCompany + StockOptionLevel + TrainingTimesLastYear, data = data2, family = binomial)
+summ(logit)
+```
+
+
+
+However, before reaching conclusions, it's important to control many things in our model of regression; one of the most important is the variance inflation factor (VIF) which gives us insights into the variables which can be “dangerous” to what concern multicollinearity.
+According to Hair et al. (1995) the maximum acceptable level of VIF is 10, whereas according to Ringle et al. (2015) the maximum acceptable level of VIF is 5.
+
+
+
+```{r echo=FALSE}
+vif(logit)
+```
+
+
+
+None of the VIF values stands outside the aforementioned critical values. There is no risk of multicollinearity and thus, no need to drop any variable.
+
+
+There are several other variables that present a significant explanatory power.
+The value of _YearsInCurrentRole_ suggests that the longer an employee keeps its position, the lower are the possibilities for him to quit. _MonthlyIncome_ and _Age_ present a negative coefficient, meaning that higher income and age result in a reduction of probability for the employee to abandon the company and as seen previously, higher income is often correlated with older age. Moreover, higher _StockOptionLevel_ (which is the opportunity for an employee to purchase, or assign to others, previously issued shares of his company) values, the lower is the attrition rate: remaining in the same company gives the opportunity to benefit from the profit of the shares that the employee owns.
+There are also positive coefficients among the variables. The values assigned to the coefficients of _NumCompaniesWorked_ and _YearsSinceLastPromotion_ suggest that if the number of companies in which the employee previously worked is high, or different years have passed since his last promotion, then the possibility for the individual to resign from the current position is higher. 
+The second logistic regression was performed on _JobRole_, confirming the results previously obtained in the charts: **Sales Representative**, **HR professionel** and **Laboratory Technicians** are the jobs the see the highest ratio of attrition.
+
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+logitjob <- multinom(JobRole ~ Attrition, data = data2)
+summary(logitjob)
+```
+
+
+
+## Regression Discontinuity Design
+
+
+RDD is performed by applying a standard OLS but splitting the observations according to a threshold, above (or below) which the treatment $Di$ is assigned.
+
+
+$Di = 1(Ri > t)$ or $Di = 1(Ri < t)$ 
+
+
+With $Ri$ as the running variable and $t$ its threshold.
+
+
+$Yi = β0 + β1Ri + β2Di(Ri > t)$ or $β2Di(Ri < t)$
+
+
+Depending on the aim of the analysis.
+By comparing the observations lying close to the threshold, it is possible to estimate the average treatment effect (ATE).
+
+
+In this case the RDD was performed by looking at two important variables, with high level of significance, from the previous regression: _MonthlyIncome_ and _Age_.
+Starting from the income as running variable $Ri$, the threshold was chosen by looking at the quantile previously computed in the data visualization, finding in 4.919 the 50% value of the four quartiles.
+Dummmy $Di$ values 1 and 0 were assigned to observation above and below the threshold, respectively.
+As expected, values above the threshold decrease the probability of attrition by 6%.
+The equation for the RDD was built in the as follows, similarly to the previous theoretical example:
+
+
+$ATTi = β0 + β1(MIi - t) + β2Di(MIi > t)$ 
+
+
+Where $ATTi$ is the _Attrition_ variable, $t$ is the threshold (4.919 in this case), $MIi - t$ is the difference between the value of the monthly income of $i$ and $Di(MIi > t)$ the dummy assigned to $i$ whether it falls above or below the threshold. 
+
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+RDDmi <- data2 %>% 
+  mutate(threshold = ifelse(MonthlyIncome > 4.919, 1, 0)) %$% 
+  glm(Attrition ~ threshold + I(MonthlyIncome - 4.919), family = binomial)
+summ(RDDmi)
+```
+
+
+
+The same experiment was repeated by setting 2.911, the limit value of the first quartile (or the **Low Income** category), as threshold.
+The second model presents higher coefficients. Above the threshold, the probability of attrition decreases by 14%.
+
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+RDDmi2 <- data2 %>% 
+  mutate(threshold = ifelse(MonthlyIncome > 2.911, 1, 0)) %$% 
+  glm(Attrition ~ threshold + I(MonthlyIncome - 2.911), family = binomial)
+summ(RDDmi2)
+```
+
+
+
+The last application of RDD was done though the age variable. In this case, the threshold was chosen from the division previously computed in the data visualization, selecting 35 as the threshold value.
+This time the coefficients present lower values, but above the threshold the probability of attrition decreases as well (-2%). 
+
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+RDDage <- data2 %>% 
+  mutate(threshold = ifelse(Age >= 35, 1, 0)) %$% 
+  glm(Attrition ~ threshold + I(Age - 35), family = binomial)
+summ(RDDage)
+```
+
+
+## Instrumental Variables
+
+
+IVs are an efficient tool that is used to study the indirect effect of certain exogenous variables that would have no direct effect on the dependent one or help preventing the effects of endogeneity within other variables in the system. 
+Because of their effects on the regression model, these exogenous variables are called, therefore, instruments. 
+
+
+Consider a linear regression structure: 
+
+
+$Yi = a + Xiβ1 + εi$ 
+
+
+If an exogenous variable has a direct effect on $Xi$ but not on $Yi$, then $Xi$ may be decomposed in its own regression with the exogenous variable: 
+
+
+$Xi = π0 + Ziπ1 + νi$ and $π1 ≠ 0$ 
+
+
+Where $Zi$ is the exogenous variable which "shows" its effect only through $Xi$, and therefore the main regression may be rewritten as follows.   
+
+
+$Yi = a + (π0 + Ziπ1 + νi)β1 + εi$
+
+
+In which the variable $Xi$ was substituted by its own regression, in a process called Two-Stages Least Squares (2SLS). In this way, it's possible to measure the impact of the exogenous variable on $Yi$. 
+
+
+The first issue is to identify the potential instruments. To be one, the exogenous variable must be correlated with $Xi$ once the other exogenous variables have been netted out, thus having $π1 ≠ 0$. This is tested through the 2SLS. Another way to prove the instrumentality of a variable comes from knowledge of the theory related to the experiment or proofs found in other empirical studies.
+
+
+### IV 1: training and overtime work
+
+
+In the current analysis, the variable _TrainingTimesLastYear_ will be tested as an instrument for overtime work. From the previous correlation matrix, it was noticeable a negative correlation between the two variables, therefore a 2SLS will be performed in order to find an actual dependence. Also, one could argue that giving more training to an employee may increase its skills and productivity, and consequently reducing the probability of having to work overtime.
+To confirm the previous hypothesis, the following regression reveals an highly significant negative coefficient of training times on overtime work, meaning that the variable helps to explain the dependent one. Therefore, _TrainingTimesLastYear_ can be considered a valid instrument.
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+ttls <- glm(OverTime ~ TrainingTimesLastYear, data = data, family = binomial)
+summ(ttls)
+IVttls <- ttls$fitted.values
+```
+
+
+Proceeding with the 2SLS, the previous regression was fitted into a second regression with the attrition variable. In this way, it will be possible to see the effect of training on _Attrition_. In R, this is possible by extracting the value of the coefficient from the previous model and set is as the regressor of the second equation. The coefficient has been named **IVttls** (Instrumental Variable _TrainingTimesLastYear_).  
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+logitIVttls <- glm(Attrition ~ IVttls, family = binomial, data = data2)
+summ(logitIVttls)
+```
+
+
+Interestingly, in the second stage it's possible to notice an higher coefficient (4.65) than the one assigned to overtime work in the first logistic model. An explanation may be: lower number of training session cause the increment of overtime work and thus, the probability for the employee to quit the current job.
+The 2SLS proved _TrainingTimesLastYear_ to have a relevant explanatory role through its effect on one of the main variables that affect attrition the most.
+
+
+The equation of the whole procedure, taking into account the previous theoretical example, is the following:
+
+
+$ATTi = a + OTiβ1 + εi$ 
+
+
+Where $ATTi$ is _Attrition_ and $OTi$ is _OverTime_  
+
+
+$OTi = π0 + TTLSiπ1 + νi$ 
+
+
+Where $TTLSi$ is _TrainingTimesLastYear_.
+Therefore
+
+
+$ATTi = a + (π0 + TTLSiπ1 + νi)β1 + εi$
+
+
+### IV 2: number of companies and years in the current company 
+
+
+From the initial logistic regression, the variable _YearsAtCompany_ didn't have a significant explanatory power on attrition rate. However, taking a look again at the previous matrix, the variable shows a negative correlation with _NumCompaniesWorked_. Therefore, a second 2SLS regression will be performed, in order to verifiy if the variable may be considered a valid instrument too (in this case affecting _NumCompaniesWorked_).
+The hypothesis is that spending longer periods working for one company consequently reduces the total number of companies in which the employee worked in, and therefore this reduces the possibility of a short term abandon of the current workplace.
+
+
+As expected, the first stage regression shows a negative and highly significant coefficient for _YearsAtCompany_, making it a relevant explanatory variable.
+ 
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+yac <- lm(NumCompaniesWorked ~ YearsAtCompany, data = data2)
+summ(yac)
+IVyac <- yac$fitted.values
+```
+
+Iterating in the same way of the previous IV (following the identical equation structure), the coefficient of the first regression named **IVyac** (Instrumental Variable _YearsAtCompany_) is fitted in the regression with the main variable of interest: attrition.
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+logitIVyac <- glm(Attrition ~ IVyac, data = data2, family = binomial)
+summ(logitIVyac)
+```
+
+
+The results are similar to the ones obtained through the previous model. The coefficient of the instrumental variable is higher (1.67) than the value of _NumCompaniesWorked_ in the initial logistic regression. An employee that has been working for little time in the current company but has worked in several previous companies has an higher probability to resign compared to others who spent more time in the same workplace.
+
+
+However, when both IVs are included in the general logistic regression, it's possible to see that only the only related to overtime work maintains its significance. Therefore it's possible to conclude that, even if it explains attrition through _NumCompaniesWorked_, the variable of years in the current company doesn't generate as much influence as the other variables previously included in the regression. 
+
+
+```{r echo=FALSE, fig.align="center", message=FALSE, out.width="30%"}
+logitIVs <- glm(Attrition ~ IVttls + IVyac + MaritalStatus + Education +
+                    Gender + Age + MonthlyIncome + YearsInCurrentRole + YearsSinceLastPromotion +
+                    StockOptionLevel, data = data2, family = binomial)
+summ(logitIVs)
+```
+
+
+## Random Control Trial
+
+
+RCTs are based on a basic regression structure:
+
+
+$Yi = α + βDi + εi$
+
+
+Where $Di$ is a dummy variable associated with assigning the subject to a particular treatment or not. It must not be confused with the RDD, since in the RCT there's no threshold, but just the random assignment to the treatment. 
+The estimates of the treatment effect (ATE) will be as follows:
+
+
+$β[OLS = E[Yi|Di = 1] − E[Yi|Di = 0]$
+
+
+Starting from the previous IV analysis related to the effect of training on overtime work, it would be advisable to go deeper in this relation and look which level of training helps preventing overtime work.
+Since the maximum value if training session present in the dataset is 6 (with the minimum of 0), the variable was split in 7 different treatment dummies, each one related to the level of training (TT0 ... TT6, with "TT" meaning "training times"). A value equal or higher than 1, corresponding to variables _YearsInCurrentRole_ and _YearsAtCompany_, was selected in the creation of the treatment dummies as well.
+
+
+The equation of the regression is as follows:
+
+
+$ATTi = α + βDij + εi$ 
+
+
+Where $Dij$ is the sum of the dummies for the treatment, denoted by $i$, the individual and $j$, the treatment. 
+
+
+$β[OLS = E[Yi|Dij = 1] − E[Yi|Dij = 0]$ 
+
+
+Will be the estimates.
+
+
+The result of the regression shows that treatments corresponding to more sessions of training (**TT5**,**TT6**), reduce the probability of working overtime by over 80%.
+
+```{r include=FALSE}
+data2$TT0 <- ifelse(data2$TrainingTimesLastYear == 0 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+data2$TT1 <- ifelse(data2$TrainingTimesLastYear == 1 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+data2$TT2 <- ifelse(data2$TrainingTimesLastYear == 2 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+data2$TT3 <- ifelse(data2$TrainingTimesLastYear == 3 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+data2$TT4 <- ifelse(data2$TrainingTimesLastYear == 4 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+data2$TT5 <- ifelse(data2$TrainingTimesLastYear == 5 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+data2$TT6 <- ifelse(data2$TrainingTimesLastYear == 6 & data2$YearsInCurrentRole > 0 & data2$YearsAtCompany > 0, c(1), c(0))
+```
+
+```{r echo=FALSE,fig.align="center", message=FALSE, out.width="30%"}
+RCTot <- glm(OverTime ~ TT0 + TT1 + TT2 + TT3 + TT4 + TT5 + TT6, family = binomial, data = data2)
+summ(RCTot, scale = TRUE)
+```
+
+
+# Conclusion
+
+
+The paper had the aim to investigate the main causes of employee attrition. In order to do this, three models of causal inference were used: Regression Discontinuity Design (RDD), Instrumental Variables (IV) and Random Control Trials (RCT).
+
+
+The results has showed that attrition is highly influenced by several factors. 
+Through the RDD it was possible to define that workers with lower income have higher probability of suffering from attrition. At the same time, younger individuals (under 35) present the same behavior. Moreover, the analysis lead to the conclusions that these two variables are correlated: younger workers are paid less than older colleagues. 
+One of the most important feature that presents an high level of explanatory power towards attrition rate attrition is overtime work. Employees suffering from overtime work are more likely to quit their current positions but through the analysis done by Instrumental Variables and Random Control Trials, it was found that enough training may prevent the risk of working overtime.
+Another factor analysed through the research, with the help of IVs, was that employees who worked in several companies are more likely to quit their current workplace in the short term.
+
+
+It is important for employers to address the issue of employee attrition. This phenomena isn't always a bad sign for the business, because it may be the result of reaching financial stability, shifting of resources or implementation of new production processes. However, being able to understand the causes of attrition in order to prevent high rates that would lead to critical situations within the company is a core mission of any business.  
+
+
+
